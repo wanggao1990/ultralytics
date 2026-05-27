@@ -282,7 +282,8 @@ def torch2imx(
     def representative_dataset_gen(dataloader=dataset):
         for batch in dataloader:
             img = batch["img"]
-            img = img / 255.0
+            pixel_max = 65535.0 if img.dtype == torch.uint16 else 255.0
+            img = img / pixel_max
             yield [img]
 
     # NOTE: need tpc_version to be "4.0" for IMX500 Pose estimation models

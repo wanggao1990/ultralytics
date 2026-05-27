@@ -113,8 +113,12 @@ class BaseDataset(Dataset):
         self.prefix = prefix
         self.fraction = fraction
         self.channels = channels
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR
+        # Use IMREAD_UNCHANGED to preserve full bit depth for all image formats including 16-bit TIFF
+        # This ensures 16-bit images retain their full dynamic range throughout the pipeline
+        self.cv2_flag = cv2.IMREAD_UNCHANGED
         self.im_files = self.get_img_files(self.img_path)
+        # Auto-detect bit depth from first image to determine normalization factor
+        self._image_max = self._detect_image_max()
         self.labels = self.get_labels()
         self.update_labels(include_class=classes)  # single_cls and include_class
         self.ni = len(self.labels)  # number of images
@@ -146,6 +150,23 @@ class BaseDataset(Dataset):
 
         # Transforms
         self.transforms = self.build_transforms(hyp=hyp)
+
+    def _detect_image_max(self) -> float:
+        """Detect the maximum pixel value from the first image for proper normalization.
+
+        Returns:
+            (float): 255.0 for 8-bit images, 65535.0 for 16-bit images.
+        """
+        if not self.im_files:
+            return 255.0
+        try:
+            sample = imread(self.im_files[0], flags=self.cv2_flag)
+            if sample is not None:
+                dtype_max = np.iinfo(sample.dtype).max if sample.dtype == np.uint16 else 255
+                return float(dtype_max)
+        except Exception:
+            pass
+        return 255.0
 
     def get_img_files(self, img_path: str | list[str]) -> list[str]:
         """Read image files from the specified path.
@@ -248,6 +269,7 @@ class BaseDataset(Dataset):
                 raise FileNotFoundError(f"Image Not Found {f}")
 
             h0, w0 = im.shape[:2]  # orig hw
+            is_16bit = im.dtype == np.uint16
             if rect_mode:  # resize long side to imgsz while maintaining aspect ratio
                 if resize_short:  # resize short side to imgsz while maintaining aspect ratio
                     r = self.imgsz / min(h0, w0)  # ratio
@@ -318,7 +340,7 @@ class BaseDataset(Dataset):
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
             im_file = random.choice(self.im_files)
-            im = imread(im_file)
+            im = imread(im_file, flags=self.cv2_flag)
             if im is None:
                 continue
             b += im.nbytes
@@ -350,7 +372,7 @@ class BaseDataset(Dataset):
         b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
         n = min(self.ni, 30)  # extrapolate from 30 random images
         for _ in range(n):
-            im = imread(random.choice(self.im_files))  # sample image
+            im = imread(random.choice(self.im_files), flags=self.cv2_flag)  # sample image
             if im is None:
                 continue
             ratio = self.imgsz / max(im.shape[0], im.shape[1])  # max(h, w)  # ratio

@@ -828,6 +828,9 @@ def compress_one_image(f: str, f_new: str | None = None, max_dim: int = 1920, qu
     try:  # use PIL
         Image.MAX_IMAGE_PIXELS = None  # Fix DecompressionBombError, allow optimization of image > ~178.9 million pixels
         im = Image.open(f)
+        # Preserve 16-bit TIFF images
+        if im.mode in {"I;16", "I;16L", "I;16B", "I"}:
+            return  # skip compression for 16-bit images to avoid data loss
         if im.mode in {"RGBA", "LA"}:  # Convert to RGB if needed (for JPEG)
             im = im.convert("RGB")
         r = max_dim / max(im.height, im.width)  # ratio
@@ -837,6 +840,11 @@ def compress_one_image(f: str, f_new: str | None = None, max_dim: int = 1920, qu
     except Exception as e:  # use OpenCV
         LOGGER.warning(f"HUB ops PIL failure {f}: {e}")
         im = cv2.imread(f)
+        if im is None:
+            return
+        # Preserve 16-bit data
+        if im.dtype == np.uint16:
+            return  # skip compression for 16-bit images to avoid data loss
         im_height, im_width = im.shape[:2]
         r = max_dim / max(im_height, im_width)  # ratio
         if r < 1.0:  # image too large

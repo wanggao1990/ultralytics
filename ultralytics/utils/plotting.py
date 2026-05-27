@@ -381,8 +381,10 @@ class Annotator:
             self.im = cv2.addWeighted(self.im, 1 - alpha, overlay, alpha, 0)
         else:
             assert isinstance(masks, torch.Tensor), "'masks' must be a torch.Tensor if 'im_gpu' is provided."
+            # Adaptive pixel max value for conversion between [0,1] and native bit depth
+            pixel_max = 65535.0 if self.im.dtype == np.uint16 else 255.0
             if len(masks) == 0:
-                self.im[:] = im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * 255
+                self.im[:] = (im_gpu.permute(1, 2, 0).contiguous().cpu().numpy() * pixel_max).astype(self.im.dtype)
                 return
             if im_gpu.device != masks.device:
                 im_gpu = im_gpu.to(masks.device)
@@ -392,9 +394,14 @@ class Annotator:
                 # Use scale_masks to properly remove padding and upsample, convert bool to float first
                 masks = ops.scale_masks(masks[None].float(), (ih, iw))[0] > 0.5
                 # Convert original BGR image to RGB tensor
-                im_gpu = (
-                    torch.from_numpy(self.im).to(masks.device).permute(2, 0, 1).flip(0).contiguous().float() / 255.0
-                )
+                if self.im.dtype == np.uint16:  # convert to float32
+                    im_gpu = (
+                        torch.from_numpy(self.im).float().to(masks.device).permute(2, 0, 1).flip(0).contiguous()
+                    )
+                else:
+                    im_gpu = (
+                        torch.from_numpy(self.im).to(masks.device).permute(2, 0, 1).flip(0).contiguous().float() / 255.0
+                    )
 
             colors = torch.tensor(colors, device=masks.device, dtype=torch.float32) / 255.0  # shape(n,3)
             colors = colors[:, None, None]  # shape(n,1,1,3)
@@ -405,7 +412,7 @@ class Annotator:
 
             im_gpu = im_gpu.flip(dims=[0]).permute(1, 2, 0).contiguous()  # shape(h,w,3)
             im_gpu = im_gpu * inv_alpha_masks[-1] + mcs
-            self.im[:] = (im_gpu * 255).byte().cpu().numpy()
+            self.im[:] = (im_gpu * pixel_max).to(torch.uint8 if pixel_max == 255 else torch.int32).cpu().numpy().astype(self.im.dtype)
         if self.pil:
             # Convert im back to PIL and update draw
             self.fromarray(self.im)
@@ -777,7 +784,10 @@ def plot_images(
     mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
     for i in range(bs):
         x, y = int(w * (i // ns)), int(h * (i % ns))  # block origin
-        mosaic[y : y + h, x : x + w, :] = images[i].transpose(1, 2, 0)
+        im = images[i].transpose(1, 2, 0)
+        if im.max() > 255:  # 16-bit images: scale down to 8-bit for visualization
+            im = (im.astype(np.float32) * 255.0 / 65535.0).round().clip(0, 255).astype(np.uint8)
+        mosaic[y : y + h, x : x + w, :] = im
 
     # Resize (optional)
     scale = max_size / ns / max(h, w)

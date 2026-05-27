@@ -166,12 +166,17 @@ class BasePredictor:
                 im = im[..., ::-1]  # BGR to RGB
             im = im.transpose((0, 3, 1, 2))  # BHWC to BCHW, (n, 3, h, w)
             im = np.ascontiguousarray(im)  # contiguous
+            img_type = torch.uint8 if im.dtype == np.uint8 else torch.uint16
             im = torch.from_numpy(im)
+        else:
+            img_type = im.dtype
 
         im = im.to(self.device)
-        im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
+        im = im.half() if self.model.fp16 else im.float()  # uint8/uint16 to fp16/32
         if not_tensor:
-            im /= 255  # 0 - 255 to 0.0 - 1.0
+            # Adaptive normalization: detect 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
+            max_val = 65535.0 if img_type == torch.uint16 else 255.0
+            im /= max_val  # 0 - max_val to 0.0 - 1.0
         return im
 
     def inference(self, im: torch.Tensor, *args, **kwargs):
@@ -496,7 +501,15 @@ class BasePredictor:
 
         # Save images
         else:
-            cv2.imwrite(str(save_path.with_suffix(".jpg")), im)  # save to JPG for best support
+            # Preserve 16-bit TIFF format if input image is 16-bit
+            if im.dtype == np.uint16 and save_path.suffix.lower() in {".tif", ".tiff"}:
+                im = (im / 257.0).astype(np.uint8)
+                cv2.imwrite(str(save_path.with_suffix(".tif")), im)  # save as 16-bit TIFF
+            elif im.dtype == np.uint16:
+                im = (im / 257.0).astype(np.uint8)
+                cv2.imwrite(str(save_path.with_suffix(".tif")), im)  # default to TIFF for 16-bit data
+            else:
+                cv2.imwrite(str(save_path.with_suffix(".jpg")), im)  # save to JPG for best support
 
     def show(self, p: str = ""):
         """Display an image in a window."""

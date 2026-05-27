@@ -116,7 +116,10 @@ class DetectionTrainer(BaseTrainer):
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
-        batch["img"] = batch["img"].float() / 255
+        # Adaptive normalization: detect 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
+        imgs = batch["img"]
+        max_val = 65535.0 if imgs.dtype == torch.uint16 else 255.0
+        batch["img"] = imgs.float() / max_val
         if self.args.multi_scale > 0.0:
             imgs = batch["img"]
             sz = (

@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.nn import functional as F
+import torchvision.transforms as T
 
 from ultralytics.data.utils import polygons2masks, polygons2masks_overlap
 from ultralytics.utils import LOGGER, IterableSimpleNamespace, colorstr
@@ -24,6 +25,27 @@ from ultralytics.utils.torch_utils import TORCHVISION_0_10, TORCHVISION_0_11, TO
 DEFAULT_MEAN = (0.0, 0.0, 0.0)
 DEFAULT_STD = (1.0, 1.0, 1.0)
 
+
+class ToTensor16Bit:
+    """Converts a PIL Image or numpy.ndarray (H x W x C) in the range [0, max_val] to a
+    torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0].
+    Handles both 8-bit (max=255) and 16-bit (max=65535) images.
+    """
+
+    def __call__(self, pic):
+        # Handles both PIL Image and numpy array
+        if isinstance(pic, np.ndarray):
+            img = torch.from_numpy(pic).float()
+            if img.ndim == 2:  # Grayscale
+                img = img.unsqueeze(0)
+            elif img.ndim == 3:
+                img = img.permute(2, 0, 1)  # HWC -> CHW
+        else:  # PIL Image
+            img = T.functional.pil_to_tensor(pic).float()
+
+        # Adaptive max: detect if 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
+        max_val = 65535.0 if img.dtype in (np.uint16, torch.uint16) else 255.0
+        return img / max_val
 
 class BaseTransform:
     """Base class for image transformations in the Ultralytics library.
@@ -593,8 +615,12 @@ class Mosaic(BaseMixTransform):
             (dict): Updated labels with mosaic image.
         """
         layout = params["layout"]
+        img_dtype = labels["img"].dtype
+        # Adaptive padding: 114 for 8-bit, ~29298 for 16-bit to keep same semantic neutral gray
+        is_16bit = img_dtype == np.uint16
+        pad_val = int(114 * 65535 / 255) if is_16bit else 114
         if self.n == 4:
-            img4 = np.full((self.imgsz * 2, self.imgsz * 2, labels["img"].shape[2]), 114, dtype=np.uint8)
+            img4 = np.full((self.imgsz * 2, self.imgsz * 2, labels["img"].shape[2]), pad_val, dtype=img_dtype)
             for item in layout:
                 labels_patch = item["labels_patch"]
                 img = labels_patch["img"]
@@ -603,7 +629,7 @@ class Mosaic(BaseMixTransform):
                 img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]
             labels["img"] = img4
         elif self.n == 9:
-            img9 = np.full((self.imgsz * 3, self.imgsz * 3, labels["img"].shape[2]), 114, dtype=np.uint8)
+            img9 = np.full((self.imgsz * 3, self.imgsz * 3, labels["img"].shape[2]), pad_val, dtype=img_dtype)
             for item in layout:
                 labels_patch = item["labels_patch"]
                 img = labels_patch["img"]
@@ -820,7 +846,7 @@ class MixUp(BaseMixTransform):
         """
         r = params["r"]
         labels2 = labels["mix_labels"][0]
-        labels["img"] = (labels["img"] * r + labels2["img"] * (1 - r)).astype(np.uint8)
+        labels["img"] = (labels["img"] * r + labels2["img"] * (1 - r)).astype(labels["img"].dtype)
         return labels
 
     def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1169,11 +1195,16 @@ class RandomPerspective(BaseTransform):
         img = labels["img"]
         M = params["M"]
         size = params["size"]
+        # Adaptive border value: scale for 16-bit images to keep same semantic neutral gray
+        border_val = 114
+        is_16bit = img.dtype == np.uint16
+        if is_16bit:
+            border_val = int(114 * 65535 / 255)
         if (size[0] != img.shape[1] or size[1] != img.shape[0]) or (M != np.eye(3)).any():  # image changed
             if self.perspective:
-                img = cv2.warpPerspective(img, M, dsize=size, borderValue=(114, 114, 114))
+                img = cv2.warpPerspective(img, M, dsize=size, borderValue=(border_val,) * 3)
             else:  # affine
-                img = cv2.warpAffine(img, M[:2], dsize=size, borderValue=(114, 114, 114))
+                img = cv2.warpAffine(img, M[:2], dsize=size, borderValue=(border_val,) * 3)
             if img.ndim == 2:
                 img = img[..., None]
         labels["img"] = img
@@ -1458,19 +1489,29 @@ class RandomHSV(BaseTransform):
         if img.shape[-1] != 3:  # only apply to RGB images
             return labels
         if self.hgain or self.sgain or self.vgain:
-            dtype = img.dtype  # uint8
-
             r = np.random.uniform(-1, 1, 3) * [self.hgain, self.sgain, self.vgain]  # random gains
-            x = np.arange(0, 256, dtype=r.dtype)
-            # lut_hue = ((x * (r[0] + 1)) % 180).astype(dtype)   # original hue implementation from ultralytics<=8.3.78
-            lut_hue = ((x + r[0] * 180) % 180).astype(dtype)
-            lut_sat = np.clip(x * (r[1] + 1), 0, 255).astype(dtype)
-            lut_val = np.clip(x * (r[2] + 1), 0, 255).astype(dtype)
-            lut_sat[0] = 0  # prevent pure white changing color, introduced in 8.3.79
+            if img.dtype == np.uint16:
+                # 16-bit: cv2.cvtColor doesn't support CV_16U, use float32
+                img_f = img.astype(np.float32) / 65535.0
+                hsv = cv2.cvtColor(img_f, cv2.COLOR_BGR2HSV)
+                hue, sat, val = cv2.split(hsv)
+                # Float32 HSV range: H in [0, 360), S in [0, 1], V in [0, 1]
+                hue = ((hue + r[0] * 360) % 360).astype(np.float32)
+                sat = np.clip(sat * (r[1] + 1), 0, 1).astype(np.float32)
+                val = np.clip(val * (r[2] + 1), 0, 1).astype(np.float32)
+                im_hsv = cv2.merge((hue, sat, val))
+                img[:] = np.clip(cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR) * 65535.0, 0, 65535).astype(np.uint16)
+            else:
+                # 8-bit: use LUT for performance
+                x = np.arange(0, 256, dtype=r.dtype)
+                lut_hue = ((x + r[0] * 180) % 180).astype(np.uint8)
+                lut_sat = np.clip(x * (r[1] + 1), 0, 255).astype(np.uint8)
+                lut_val = np.clip(x * (r[2] + 1), 0, 255).astype(np.uint8)
+                lut_sat[0] = 0  # prevent pure white changing color
 
-            hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
-            im_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val)))
-            cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR, dst=img)  # no return needed
+                hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
+                im_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val)))
+                cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR, dst=img)
         return labels
 
 
@@ -1765,12 +1806,18 @@ class LetterBox(BaseTransform):
         h, w, c = img.shape
         top, bottom = params["top"], params["bottom"]
         left, right = params["left"], params["right"]
+
+        # Adaptive padding value: scale for 16-bit images to keep same semantic neutral gray
+        pad_val = self.padding_value
+        is_16bit = img.dtype == np.uint16
+        if is_16bit:
+            pad_val = int(self.padding_value * 65535 / 255)
         if c == 3:
             img = cv2.copyMakeBorder(
-                img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(self.padding_value,) * 3
+                img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(pad_val,) * 3
             )
         else:  # multispectral
-            pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
+            pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=pad_val, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
 
@@ -2809,7 +2856,7 @@ def classify_transforms(
     else:
         # Resize the shortest edge to matching target dim for non-square target
         tfl = [T.Resize(scale_size)]
-    tfl += [T.CenterCrop(size), T.ToTensor(), T.Normalize(mean=torch.tensor(mean), std=torch.tensor(std))]
+    tfl += [T.CenterCrop(size), ToTensor16Bit(), T.Normalize(mean=torch.tensor(mean), std=torch.tensor(std))]
     return T.Compose(tfl)
 
 
@@ -2908,7 +2955,8 @@ def classify_augmentations(
         secondary_tfl.append(T.ColorJitter(brightness=hsv_v, contrast=hsv_v, saturation=hsv_s, hue=hsv_h))
 
     final_tfl = [
-        T.ToTensor(),
+        # T.ToTensor(),
+        ToTensor16Bit(),
         T.Normalize(mean=torch.tensor(mean), std=torch.tensor(std)),
         T.RandomErasing(p=erasing, inplace=True),
     ]
@@ -2985,8 +3033,13 @@ class ClassifyLetterBox:
         hs, ws = (math.ceil(x / self.stride) * self.stride for x in (h, w)) if self.auto else (self.h, self.w)
         top, left = round((hs - h) / 2 - 0.1), round((ws - w) / 2 - 0.1)
 
+        # Adaptive padding value: scale for 16-bit images to keep same semantic neutral gray
+        pad_val = 114
+        if im.dtype == np.uint16:
+            pad_val = int(114 * 65535 / 255)
+
         # Create padded image
-        im_out = np.full((hs, ws, 3), 114, dtype=im.dtype)
+        im_out = np.full((hs, ws, 3), pad_val, dtype=im.dtype)
         im_out[top : top + h, left : left + w] = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
         return im_out
 
@@ -3110,7 +3163,10 @@ class ToTensor:
             torch.Size([3, 640, 640]) torch.float16
         """
         im = np.ascontiguousarray(im.transpose((2, 0, 1)))  # HWC to CHW -> contiguous
+        # Adaptive normalization: detect 16-bit by dtype before conversion (not by max value, since 16-bit images may have max < 255)
+        is_16bit = im.dtype == np.uint16
+        max_val = 65535.0 if is_16bit else 255.0
         im = torch.from_numpy(im)  # to torch
-        im = im.half() if self.half else im.float()  # uint8 to fp16/32
-        im /= 255.0  # 0-255 to 0.0-1.0
+        im = im.half() if self.half else im.float()  # uint8/uint16 to fp16/32
+        im /= max_val  # 0-max_val to 0.0-1.0
         return im

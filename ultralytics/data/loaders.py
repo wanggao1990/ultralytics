@@ -105,7 +105,7 @@ class LoadStreams:
         self.running = True  # running flag for Thread
         self.mode = "stream"
         self.vid_stride = vid_stride  # video frame-rate stride
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR  # grayscale or color (BGR)
+        self.cv2_flag = cv2.IMREAD_UNCHANGED  # grayscale or color (BGR)
 
         sources = Path(sources).read_text().rsplit() if os.path.isfile(sources) else [sources]
         n = len(sources)
@@ -276,7 +276,7 @@ class LoadScreenshots:
         self.sct = mss.mss()
         self.bs = 1
         self.fps = 30
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR  # grayscale or color (BGR)
+        self.cv2_flag = cv2.IMREAD_UNCHANGED  # grayscale or color (BGR)
 
         # Parse monitor shape
         monitor = self.sct.monitors[self.screen]
@@ -384,7 +384,7 @@ class LoadImagesAndVideos:
         self.mode = "video" if ni == 0 else "image"  # default to video if no images
         self.vid_stride = vid_stride  # video frame-rate stride
         self.bs = batch
-        self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR  # grayscale or color (BGR)
+        self.cv2_flag = cv2.IMREAD_UNCHANGED  # grayscale or color (BGR)
         if any(videos):
             self._new_video(videos[0])  # new video
         else:
@@ -521,12 +521,21 @@ class LoadPilAndNumpy:
         Notes:
             - PIL inputs are converted to NumPy and returned in OpenCV-compatible BGR order for color images.
             - NumPy inputs are returned as-is (no channel-order conversion is applied).
+            - 16-bit PIL images are preserved in uint16 format without quantization.
         """
         assert isinstance(im, (Image.Image, np.ndarray)), f"Expected PIL/np.ndarray image type, but got {type(im)}"
         if isinstance(im, Image.Image):
-            im = np.asarray(im.convert(flag))
-            # Add a new axis if grayscale; convert RGB -> BGR for OpenCV compatibility.
-            im = im[..., None] if flag == "L" else im[..., ::-1]
+            # Preserve 16-bit depth images without dropping to 8-bit
+            if im.mode in {"I;16", "I;16L", "I;16B", "I"}:
+                im = np.asarray(im, dtype=np.uint16)
+                if flag == "L":
+                    im = im[..., None]
+                else:  # RGB: replicate grayscale to 3 channels
+                    im = np.stack([im] * 3, axis=-1)
+            else:
+                im = np.asarray(im.convert(flag))
+                # Add a new axis if grayscale; convert RGB -> BGR for OpenCV compatibility.
+                im = im[..., None] if flag == "L" else im[..., ::-1]
             im = np.ascontiguousarray(im)  # contiguous
         elif im.ndim == 2:  # grayscale in numpy form
             im = im[..., None]
@@ -599,10 +608,12 @@ class LoadTensor:
         if im.shape[2] % stride or im.shape[3] % stride:
             raise ValueError(s)
         if im.max() > 1.0 + torch.finfo(im.dtype).eps:  # torch.float32 eps is 1.2e-07
+            # Auto-detect bit depth by dtype (not by max value, since 16-bit images may have max < 255)
+            max_val = 65535.0 if im.dtype == torch.uint16 else 255.0
             LOGGER.warning(
-                f"torch.Tensor inputs should be normalized 0.0-1.0 but max value is {im.max()}. Dividing input by 255."
+                f"torch.Tensor inputs should be normalized 0.0-1.0 but max value is {im.max()}. Dividing input by {max_val}."
             )
-            im = im.float() / 255.0
+            im = im.float() / max_val
 
         return im
 

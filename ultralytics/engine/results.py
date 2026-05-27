@@ -512,7 +512,17 @@ class Results(SimpleClass, DataExportMixin):
         """
         assert color_mode in {"instance", "class"}, f"Expected color_mode='instance' or 'class', not {color_mode}."
         if img is None and isinstance(self.orig_img, torch.Tensor):
+            # if self.orig_img.dtype == tirch.uint16:
+            #     # Adaptive normalization: detect if original data was 16-bit by dtype
+            #     orig_tensor = self.orig_img[0].detach().permute(1, 2, 0).contiguous()
+            #     img = (orig_tensor * 65535.0).clamp(0, 65535.0).to(torch.int32).cpu().numpy().astype(np.uint16)
+            # else:
+            #     img = (self.orig_img[0].detach().permute(1, 2, 0).contiguous() * 255).byte().cpu().numpy()
             img = (self.orig_img[0].detach().permute(1, 2, 0).contiguous() * 255).byte().cpu().numpy()
+
+        if img is None:
+            if self.orig_img.dtype == np.uint16:
+                img = (self.orig_img / 257.0).astype(np.uint8)
 
         names = self.names
         is_obb = self.obb is not None
@@ -532,12 +542,14 @@ class Results(SimpleClass, DataExportMixin):
         if pred_masks and show_masks:
             if im_gpu is None:
                 img = LetterBox(pred_masks.shape[1:])(image=annotator.result())
+                # Adaptive normalization: 255 for 8-bit, 65535 for 16-bit images
+                pixel_max = 65535.0 if img.dtype == np.uint16 else 255.0
                 im_gpu = (
                     torch.as_tensor(img, dtype=torch.float16, device=pred_masks.data.device)
                     .permute(2, 0, 1)
                     .flip(0)
                     .contiguous()
-                    / 255
+                    / pixel_max
                 )
             idx = (
                 pred_boxes.id
