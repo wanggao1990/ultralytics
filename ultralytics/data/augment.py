@@ -1493,14 +1493,14 @@ class RandomHSV(BaseTransform):
             if img.dtype == np.uint16:
                 # 16-bit: cv2.cvtColor doesn't support CV_16U, use float32
                 img_f = img.astype(np.float32) / 65535.0
-                hsv = cv2.cvtColor(img_f, cv2.COLOR_BGR2HSV)
+                hsv = cv2.cvtColor(img_f, cv2.COLOR_BGR2HSV_FULL)
                 hue, sat, val = cv2.split(hsv)
                 # Float32 HSV range: H in [0, 360), S in [0, 1], V in [0, 1]
                 hue = ((hue + r[0] * 360) % 360).astype(np.float32)
                 sat = np.clip(sat * (r[1] + 1), 0, 1).astype(np.float32)
                 val = np.clip(val * (r[2] + 1), 0, 1).astype(np.float32)
                 im_hsv = cv2.merge((hue, sat, val))
-                img[:] = np.clip(cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR) * 65535.0, 0, 65535).astype(np.uint16)
+                img[:] = np.clip(cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR_FULL) * 65535.0, 0, 65535).astype(np.uint16)
             else:
                 # 8-bit: use LUT for performance
                 x = np.arange(0, 256, dtype=r.dtype)
