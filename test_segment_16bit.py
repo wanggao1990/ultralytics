@@ -1,19 +1,17 @@
+import os
+import sys
+import tempfile
+
 import cv2
 import numpy as np
-import tempfile
-import sys
-import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ultralytics import YOLO
-from ultralytics.data.augment import LetterBox, ToTensor
-from ultralytics.data.loaders import LoadImagesAndVideos
+
 
 def test_segment_16bit_preprocessing():
-    """
-    Test segment task: 16-bit input -> preprocessing -> float conversion -> save before inference
-    """
+    """Test segment task: 16-bit input -> preprocessing -> float conversion -> save before inference."""
     print("=" * 70)
     print("Testing Segment Task with 16-bit Input")
     print("Preprocessing Pipeline: 16-bit -> float -> save before inference")
@@ -22,9 +20,11 @@ def test_segment_16bit_preprocessing():
     # model_path = "yolo11n-seg.pt"
     # input_path = r'bus.tif'
 
-    model_path = r'E:\datasets\bingli\annotation\keyan\20260520\LS\anno\runs\segment\train\weights\best.pt'
-    input_path = r'E:\datasets\bingli\annotation\keyan\20260520\LS\anno\images\train\20260514-bf-ls-brain-1x_0009-561.tif'
-    
+    model_path = r"E:\datasets\bingli\annotation\keyan\20260520\LS\anno\runs\segment\train\weights\best.pt"
+    input_path = (
+        r"E:\datasets\bingli\annotation\keyan\20260520\LS\anno\images\train\20260514-bf-ls-brain-1x_0009-561.tif"
+    )
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Step 1: Create 16-bit test image
         print("\n[1] Creating 16-bit test image...")
@@ -79,7 +79,7 @@ def test_segment_16bit_preprocessing():
         # # Verify saved file
         # saved = cv2.imread(intermediate_path, cv2.IMREAD_UNCHANGED)
         # print(f"    Saved intermediate: dtype={saved.dtype}, shape={saved.shape}, range=[{saved.min()}, {saved.max()}]")
-        
+
         # Step 6: Run actual segment inference
         print("\n[6] Running YOLO segment inference...")
         model = YOLO(model_path)
@@ -88,24 +88,24 @@ def test_segment_16bit_preprocessing():
             imgsz=640,
             verbose=False,
             save=True,
-            project='tmp',
+            project="tmp",
             name="segment_output",
-            retina_masks = True
+            retina_masks=True,
         )
-        
+
         # Check segment-specific outputs
         if len(results) > 0:
             result = results[0]
             print(f"    Inference completed: {len(results)} result(s)")
-            
+
             # Check masks if available
             if result.masks is not None:
                 print(f"    Masks detected: shape={result.masks.data.shape}")
-            
+
             # Check bounding boxes
             if result.boxes is not None:
                 print(f"    Boxes detected: {len(result.boxes)}")
-        
+
         # Step 7: Verify output
         print("\n[7] Verifying output...")
         output_path = os.path.join(tmp_dir, "segment_output", "input_16bit.tif")
@@ -113,21 +113,22 @@ def test_segment_16bit_preprocessing():
             output_img = cv2.imread(output_path, cv2.IMREAD_UNCHANGED)
             print(f"    Output saved: dtype={output_img.dtype}, shape={output_img.shape}")
             if output_img.dtype == np.uint16:
-                print(f"    OK: Output preserved 16-bit format")
+                print("    OK: Output preserved 16-bit format")
             else:
                 print(f"    Note: Output converted to {output_img.dtype}")
-        
+
         print("\n" + "=" * 70)
         print("Test completed successfully!")
         print("=" * 70)
         return True
+
 
 def main():
     print("\n" + "=" * 70)
     print("Segment Task 16-bit Preprocessing Test")
     print("Testing: 16-bit -> float -> save before inference")
     print("=" * 70)
-    
+
     try:
         test_segment_16bit_preprocessing()
         print("\n✓ All tests passed!")
@@ -135,8 +136,10 @@ def main():
     except Exception as e:
         print(f"\n✗ Test failed with error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())
