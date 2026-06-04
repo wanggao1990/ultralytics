@@ -177,6 +177,27 @@ class BasePredictor:
             # Adaptive normalization: detect 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
             max_val = 65535.0 if img_type == torch.uint16 else 255.0
             im /= max_val  # 0 - max_val to 0.0 - 1.0
+
+        # if not_tensor:
+        #     if im.dtype == torch.uint16:
+        #         imgs_float = im.float()
+        #         p_low, p_high = 1, 99
+        #         imgs_flat = imgs_float.view(imgs_float.shape[0], imgs_float.shape[1], -1)  # (1, C, H*W)
+        #         p1 = torch.quantile(imgs_flat, p_low / 100.0, dim=2, keepdim=True)  # (1, C, 1)
+        #         p2 = torch.quantile(imgs_flat, p_high / 100.0, dim=2, keepdim=True)  # (1, C, 1)
+        #         p1 = p1.unsqueeze(-1)  # (1, C, 1, 1)
+        #         p2 = p2.unsqueeze(-1)  # (1, C, 1, 1)
+        #
+        #         denominator = p2 - p1
+        #         denominator[denominator == 0] = 1.0
+        #
+        #         norm_imgs = (imgs_float - p1) / denominator
+        #         # norm_imgs = norm_imgs.clamp(0, 1)
+        #
+        #         im = norm_imgs.half() if self.model.fp16 else norm_imgs.float()
+        #     else:
+        #         im = (im.half() if self.model.fp16 else im.float()) / 255.0
+
         return im
 
     def inference(self, im: torch.Tensor, *args, **kwargs):

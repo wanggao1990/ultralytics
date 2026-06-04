@@ -22,7 +22,7 @@ def test_segment_16bit_preprocessing():
     # model_path = "yolo11n-seg.pt"
     # input_path = r'bus.tif'
 
-    model_path = r'E:\datasets\bingli\annotation\keyan\20260520\LS\anno\runs\segment\train\weights\best.pt'
+    model_path = r'E:\datasets\bingli\annotation\keyan\20260520\LS\anno\runs\segment\train-7\weights\best.pt'
     input_path = r'E:\datasets\bingli\annotation\keyan\20260520\LS\anno\images\train\20260514-bf-ls-brain-1x_0009-561.tif'
     
     with tempfile.TemporaryDirectory() as tmp_dir:

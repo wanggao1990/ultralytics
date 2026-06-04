@@ -75,7 +75,30 @@ class DetectionValidator(BaseValidator):
         # Adaptive normalization: detect 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
         imgs = batch["img"]
         max_val = 65535.0 if imgs.dtype == torch.uint16 else 255.0
-        batch["img"] = (imgs.half() if self.args.half else imgs.float()) / max_val
+        # batch["img"] = (imgs.half() if self.args.half else imgs.float()) / max_val
+        batch["img"] = imgs.float() / max_val  # 始终 float32 归一化，保证精度
+        if self.args.half:
+            batch["img"] = batch["img"].half()  # 归一化后再转 half
+
+        # if imgs.dtype == torch.uint16:
+        #     imgs_float = imgs.float()
+        #     p_low, p_high = 1, 99
+        #     imgs_flat = imgs_float.view(imgs_float.shape[0], imgs_float.shape[1], -1)  # (1, C, H*W)
+        #     p1 = torch.quantile(imgs_flat, p_low / 100.0, dim=2, keepdim=True)  # (1, C, 1)
+        #     p2 = torch.quantile(imgs_flat, p_high / 100.0, dim=2, keepdim=True)  # (1, C, 1)
+        #     p1 = p1.unsqueeze(-1)  # (1, C, 1, 1)
+        #     p2 = p2.unsqueeze(-1)  # (1, C, 1, 1)
+        #
+        #     denominator = p2 - p1
+        #     denominator[denominator == 0] = 1.0
+        #
+        #     norm_imgs = (imgs_float - p1) / denominator
+        #     # norm_imgs = norm_imgs.clamp(0, 1)
+        #
+        #     batch["img"] = norm_imgs.half() if self.args.half else norm_imgs.float()
+        # else:
+        #     batch["img"] = (imgs.half() if self.args.half else imgs.float()) / 255.0
+
         return batch
 
     def init_metrics(self, model: torch.nn.Module) -> None:

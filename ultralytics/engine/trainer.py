@@ -20,6 +20,7 @@ from functools import partial
 from pathlib import Path
 
 import numpy as np
+import tifffile
 import torch
 from torch import distributed as dist
 from torch import nn, optim
@@ -440,8 +441,15 @@ class BaseTrainer:
 
                 # Forward
                 try:
+
+                    # batch_save_dir = Path("batch_train")
+                    # batch_save_dir.mkdir(exist_ok=True, parents=True)
+
                     with autocast(self.amp):
                         batch = self.preprocess_batch(batch)
+
+                        # tifffile.imwrite(batch_save_dir / f"{i}.tiff", batch["img"].cpu().numpy())
+
                         if self.args.compile:
                             # Decouple inference and loss calculations for improved compile performance
                             preds = self.model(batch["img"])
@@ -747,6 +755,10 @@ class BaseTrainer:
         """Perform a single step of the training optimizer with gradient clipping and EMA update."""
         self.scaler.unscale_(self.optimizer)  # unscale gradients
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+
+        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_value_(self.model.parameters(), clip_value=0.5)
+
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.optimizer.zero_grad()

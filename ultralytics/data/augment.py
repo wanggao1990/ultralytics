@@ -1200,11 +1200,15 @@ class RandomPerspective(BaseTransform):
         is_16bit = img.dtype == np.uint16
         if is_16bit:
             border_val = int(114 * 65535 / 255)
+
+            # border_val = min(int(img.max()) / 2, border_val)
+
         if (size[0] != img.shape[1] or size[1] != img.shape[0]) or (M != np.eye(3)).any():  # image changed
             if self.perspective:
                 img = cv2.warpPerspective(img, M, dsize=size, borderValue=(border_val,) * 3)
             else:  # affine
-                img = cv2.warpAffine(img, M[:2], dsize=size, borderValue=(border_val,) * 3)
+                # img = cv2.warpAffine(img, M[:2], dsize=size, borderValue=(border_val,) * 3)
+                img = cv2.warpAffine(img, M[:2], dsize=size, borderMode=cv2.BORDER_REFLECT)
             if img.ndim == 2:
                 img = img[..., None]
         labels["img"] = img
@@ -1812,10 +1816,14 @@ class LetterBox(BaseTransform):
         is_16bit = img.dtype == np.uint16
         if is_16bit:
             pad_val = int(self.padding_value * 65535 / 255)
+
+            # pad_val = min(int(img.max()) / 2, pad_val)
+
         if c == 3:
-            img = cv2.copyMakeBorder(
-                img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(pad_val,) * 3
-            )
+            # img = cv2.copyMakeBorder(
+            #     img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(pad_val,) * 3
+            # )
+            img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_REFLECT)
         else:  # multispectral
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=pad_val, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
@@ -1844,7 +1852,8 @@ class LetterBox(BaseTransform):
             mask = cv2.resize(mask, new_unpad, interpolation=cv2.INTER_NEAREST)
         top, bottom = params["top"], params["bottom"]
         left, right = params["left"], params["right"]
-        mask = cv2.copyMakeBorder(mask, top, bottom, left, right, cv2.BORDER_CONSTANT, value=255)
+        # mask = cv2.copyMakeBorder(mask, top, bottom, left, right, cv2.BORDER_CONSTANT, value=255)
+        mask = cv2.copyMakeBorder(mask, top, bottom, left, right, cv2.BORDER_REPLICATE)
         labels["semantic_mask"] = mask
         return labels
 
