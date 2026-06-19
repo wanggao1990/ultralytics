@@ -269,7 +269,6 @@ class BaseDataset(Dataset):
                 raise FileNotFoundError(f"Image Not Found {f}")
 
             h0, w0 = im.shape[:2]  # orig hw
-            is_16bit = im.dtype == np.uint16
             if rect_mode:  # resize long side to imgsz while maintaining aspect ratio
                 if resize_short:  # resize short side to imgsz while maintaining aspect ratio
                     r = self.imgsz / min(h0, w0)  # ratio
