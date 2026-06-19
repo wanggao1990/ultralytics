@@ -20,7 +20,6 @@ from functools import partial
 from pathlib import Path
 
 import numpy as np
-import tifffile
 import torch
 from torch import distributed as dist
 from torch import nn, optim
@@ -441,7 +440,6 @@ class BaseTrainer:
 
                 # Forward
                 try:
-
                     # batch_save_dir = Path("batch_train")
                     # batch_save_dir.mkdir(exist_ok=True, parents=True)
 

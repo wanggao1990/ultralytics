@@ -10,9 +10,9 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
+import torchvision.transforms as T
 from PIL import Image
 from torch.nn import functional as F
-import torchvision.transforms as T
 
 from ultralytics.data.utils import polygons2masks, polygons2masks_overlap
 from ultralytics.utils import LOGGER, IterableSimpleNamespace, colorstr
@@ -27,9 +27,8 @@ DEFAULT_STD = (1.0, 1.0, 1.0)
 
 
 class ToTensor16Bit:
-    """Converts a PIL Image or numpy.ndarray (H x W x C) in the range [0, max_val] to a
-    torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0].
-    Handles both 8-bit (max=255) and 16-bit (max=65535) images.
+    """Converts a PIL Image or numpy.ndarray (H x W x C) in the range [0, max_val] to a torch.FloatTensor of shape (C x
+    H x W) in the range [0.0, 1.0]. Handles both 8-bit (max=255) and 16-bit (max=65535) images.
     """
 
     def __call__(self, pic):
@@ -46,6 +45,7 @@ class ToTensor16Bit:
         # Adaptive max: detect if 16-bit by dtype (not by max value, since 16-bit images may have max < 255)
         max_val = 65535.0 if img.dtype in (np.uint16, torch.uint16) else 255.0
         return img / max_val
+
 
 class BaseTransform:
     """Base class for image transformations in the Ultralytics library.

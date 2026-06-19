@@ -395,9 +395,7 @@ class Annotator:
                 masks = ops.scale_masks(masks[None].float(), (ih, iw))[0] > 0.5
                 # Convert original BGR image to RGB tensor
                 if self.im.dtype == np.uint16:  # convert to float32
-                    im_gpu = (
-                        torch.from_numpy(self.im).float().to(masks.device).permute(2, 0, 1).flip(0).contiguous()
-                    )
+                    im_gpu = torch.from_numpy(self.im).float().to(masks.device).permute(2, 0, 1).flip(0).contiguous()
                 else:
                     im_gpu = (
                         torch.from_numpy(self.im).to(masks.device).permute(2, 0, 1).flip(0).contiguous().float() / 255.0
@@ -412,7 +410,13 @@ class Annotator:
 
             im_gpu = im_gpu.flip(dims=[0]).permute(1, 2, 0).contiguous()  # shape(h,w,3)
             im_gpu = im_gpu * inv_alpha_masks[-1] + mcs
-            self.im[:] = (im_gpu * pixel_max).to(torch.uint8 if pixel_max == 255 else torch.int32).cpu().numpy().astype(self.im.dtype)
+            self.im[:] = (
+                (im_gpu * pixel_max)
+                .to(torch.uint8 if pixel_max == 255 else torch.int32)
+                .cpu()
+                .numpy()
+                .astype(self.im.dtype)
+            )
         if self.pil:
             # Convert im back to PIL and update draw
             self.fromarray(self.im)
